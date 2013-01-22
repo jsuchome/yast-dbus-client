@@ -65,6 +65,10 @@ private:
     DBusConnection* connection;
     DBusError error;
 
+    YCPValue getYCPValueRawAny(DBusMessageIter *it) const;
+    YCPValue getYCPValueInteger(DBusMessageIter *it) const;
+    YCPMap getYCPValueMap(DBusMessageIter *it) const;
+
 };
 
 

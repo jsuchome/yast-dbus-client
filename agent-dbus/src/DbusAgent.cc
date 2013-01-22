@@ -24,6 +24,191 @@ DbusAgent::~DbusAgent()
     disconnect();
 }
 
+// FIXME YCPValue functions _copy-pasted_ from yast2-dbus-server! 
+// (but only the simple versions, which are enough...)
+
+//
+// returns YCPNull without an error if "it" does not point to an integer/byte
+YCPValue DbusAgent::getYCPValueInteger(DBusMessageIter *it) const
+{
+    int type = dbus_message_iter_get_arg_type(it);
+    YCPValue ret;
+
+    switch (type) {
+	case DBUS_TYPE_INT64:
+	{
+	    dbus_int64_t i;
+	    dbus_message_iter_get_basic(it, &i);
+	    ret = YCPInteger(i);
+	    break;
+	}
+	case DBUS_TYPE_UINT64:
+	{
+	    // warning: YCPInteger is signed!
+	    dbus_uint64_t i;
+	    dbus_message_iter_get_basic(it, &i);
+	    ret = YCPInteger(i);
+	    break;
+	}
+	case DBUS_TYPE_INT32:
+	{
+	    dbus_int32_t i;
+	    dbus_message_iter_get_basic(it, &i);
+	    ret = YCPInteger(i);
+	    break;
+	}
+	case DBUS_TYPE_UINT32:
+	{
+	    dbus_uint32_t i;
+	    dbus_message_iter_get_basic(it, &i);
+	    ret = YCPInteger(i);
+	    break;
+	}
+	case DBUS_TYPE_INT16:
+	{
+	    dbus_int16_t i;
+	    dbus_message_iter_get_basic(it, &i);
+	    ret = YCPInteger(i);
+	    break;
+	}
+	case DBUS_TYPE_UINT16:
+	{
+	    dbus_uint16_t i;
+	    dbus_message_iter_get_basic(it, &i);
+	    ret = YCPInteger(i);
+	    break;
+	}
+	case DBUS_TYPE_BYTE:
+	{
+	    unsigned char i;
+	    dbus_message_iter_get_basic(it, &i);
+	    ret = YCPInteger(i);
+	    break;
+	}
+    }
+    return ret;
+}
+
+// "it" is the inside iterator
+YCPMap DbusAgent::getYCPValueMap(DBusMessageIter *it) const
+{
+    YCPMap map;
+
+    while (dbus_message_iter_get_arg_type (it) != DBUS_TYPE_INVALID)
+    {
+        int type = dbus_message_iter_get_arg_type(it);
+
+	// is it a map or a list?
+	if (type == DBUS_TYPE_DICT_ENTRY)
+	{
+	    DBusMessageIter mapit;
+	    dbus_message_iter_recurse(it, &mapit);
+
+	    // DICT keys cannot be structs, skip Bsv
+	    YCPValue key = getYCPValueRawAny (&mapit);
+
+	    dbus_message_iter_next(&mapit);
+
+	    // read the value
+	    YCPValue val = getYCPValueRawAny (&mapit);
+
+	    map->add(key, val);
+	}
+        else
+        {
+            y2error ("Does not look like a map: %c", type);
+        }
+
+	dbus_message_iter_next(it);
+    }
+    return map;
+}
+
+YCPValue DbusAgent::getYCPValueRawAny(DBusMessageIter *it) const
+{
+    YCPValue ret;
+
+    int type = dbus_message_iter_get_arg_type(it);
+    if (type == DBUS_TYPE_BOOLEAN)
+    {
+	dbus_bool_t b; // not bool, bnc#606712
+	dbus_message_iter_get_basic(it, &b);
+	ret = YCPBoolean(b);
+    }
+    else if (type == DBUS_TYPE_STRING || type == DBUS_TYPE_OBJECT_PATH)
+    {
+	const char *s;
+	dbus_message_iter_get_basic(it, &s);
+	ret = YCPString(s);
+    }
+    else if (type == DBUS_TYPE_ARRAY || type == DBUS_TYPE_STRUCT)
+    {
+	DBusMessageIter sub;
+	dbus_message_iter_recurse(it, &sub);
+
+	// DBUS_TYPE_ARRAY is used for YCPList and YCPMap
+	y2debug ("Reading RAW DBus array");
+
+	// is the container a map or a list? => check the signature of the iterator
+	// hash signature starts with '{', examples: list signature: "s", map signature: "{sv}"
+	std::string cont_sig(dbus_message_iter_get_signature(&sub));
+	y2debug ("Container signature: %s", cont_sig.c_str());
+
+	if (!cont_sig.empty() && cont_sig[0] == '{')
+	{
+	    y2debug ("Found a map");
+	    ret = getYCPValueMap(&sub);
+	}
+	else
+	{
+	    y2debug ("Found a list or struct (%c)", type);
+
+	    YCPList lst;
+
+	    while (dbus_message_iter_get_arg_type (&sub) != DBUS_TYPE_INVALID)
+	    {
+		YCPValue list_val = getYCPValueRawAny (&sub);
+		lst->add(list_val);
+
+		dbus_message_iter_next(&sub);
+	    }
+
+	    ret = lst;
+	}
+    }
+    else if (type == DBUS_TYPE_DOUBLE)
+    {
+	double d;
+	dbus_message_iter_get_basic(it, &d);
+	ret = YCPFloat(d);
+    }
+    else if (type == DBUS_TYPE_VARIANT)
+    {
+	DBusMessageIter sub;
+	dbus_message_iter_recurse(it, &sub);
+
+	y2debug ("Found a DBus variant");
+	YCPValue val;
+
+	// there should be just one value inside the container
+	if (dbus_message_iter_get_arg_type (&sub) != DBUS_TYPE_INVALID)
+	{
+	    val = getYCPValueRawAny(&sub);
+	}
+	// FIXME YCPNull possible
+	ret = val;
+    }
+    else
+    {
+	ret = getYCPValueInteger(it);
+	if (ret.isNull())
+	{
+	    y2error ("Unsupported DBus type: %d (%c)", type, (char)type);
+	}
+    }
+
+    return ret;
+}
 
 YCPValue
 DbusAgent::Read(const YCPPath& path, const YCPValue& arg, const YCPValue&)
@@ -164,7 +349,9 @@ DbusAgent::Execute(const YCPPath& path, const YCPValue& value,
 
 	if (dbus_error_is_set(&error))
 	{
+ 	    y2error("dbus_connection_send_with_reply_and_block() failed (%s: %s)", error.name, error.message);
 	    dbus_error_free(&error);
+            // FIXME save the error type for later retrieval (esp. permission error)
 	    return YCPError("dbus_connection_send_with_reply_and_block() failed");
 	}
 
@@ -173,9 +360,14 @@ DbusAgent::Execute(const YCPPath& path, const YCPValue& value,
 	    return YCPError("dbus_connection_send_with_reply_and_block() failed");
 	}
 
+  	DBusMessageIter reply_iter;
+ 	dbus_message_iter_init(reply, &reply_iter);
+           
+        YCPValue result = getYCPValueRawAny (&reply_iter);
+
 	dbus_message_unref(reply);
 
-	return YCPBoolean(true);
+	return result;
     }
 
     return YCPError(string("Undefined subpath for Execute(") + path->toString() + ")");
