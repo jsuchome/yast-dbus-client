@@ -69,6 +69,11 @@ private:
     YCPValue getYCPValueInteger(DBusMessageIter *it) const;
     YCPMap getYCPValueMap(DBusMessageIter *it) const;
 
+    bool addYCPValueRaw (const YCPValue &val, DBusMessageIter *i);
+    bool addValue (int type, void* data, DBusMessageIter *i);
+
+    std::string YCPTypeSignature(constTypePtr type);
+
 };
 
 
